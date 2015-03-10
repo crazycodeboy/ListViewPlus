@@ -12,7 +12,6 @@ public void onLoadMore();//上拉加载更多的时候被回调
 提示：实现了该接口之后要调用
 `public void setListViewPlusListener(ListViewPlusListener l) `
 来设置监听器。
-
 3. 为了方便使用，程序提供了
 ```
 public void setRefreshEnable(boolean enable)//设置下拉刷新是否可用
