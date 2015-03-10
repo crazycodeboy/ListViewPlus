@@ -10,13 +10,10 @@ import android.widget.BaseAdapter;
 import android.widget.TextView;
 
 import com.jph.lp.R;
-
-/**
- * @author SunnyCoffee
- * @date 2014-2-2
- * @version 1.0
- * @desc 适配器
- * 
+/** 
+ * 适配器
+ * @author JPH
+ * @date 2015-3-10 下午12:36:59
  */
 public class ListViewAdapter extends BaseAdapter {
 

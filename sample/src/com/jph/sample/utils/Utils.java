@@ -4,13 +4,11 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
 
-/**
- * @Author SunnyCoffee
- * @Date 2014-1-28
- * @version 1.0
- * @Desc 工具类
+/** 
+ * 工具类
+ * @author JPH
+ * @date 2015-3-10 下午12:38:00
  */
-
 public class Utils {
 
 	public static String getCurrentTime(String format) {
