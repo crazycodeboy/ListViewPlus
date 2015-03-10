@@ -15,6 +15,11 @@ import com.jph.sample.utils.Utils;
 import com.jph.view.ListViewPlus;
 import com.jph.view.ListViewPlus.ListViewPlusListener;
 
+/** 
+ * ListViewPlus应用实例
+ * @author JPH
+ * @date 2015-3-10 下午12:35:13
+ */
 public class MainActivity extends Activity implements ListViewPlusListener{
 	private ListViewPlus lvPlus;
 	private ListViewAdapter mAdapter;
