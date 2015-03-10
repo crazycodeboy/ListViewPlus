@@ -9,12 +9,12 @@
 public void onRefresh();//下拉刷新的时候会被回调
 public void onLoadMore();//上拉加载更多的时候被回调
 ```
-提示：实现了该接口之后要调用
-`java public void setListViewPlusListener(ListViewPlusListener l) `
-来设置监听器。
+提示：实现了该接口之后要调用public void setListViewPlusListener(ListViewPlusListener l) 
+来设置监听器。  
 3. 为了方便使用，程序提供了
 ```java
 public void setRefreshEnable(boolean enable)//设置下拉刷新是否可用
 public void setLoadEnable(boolean enable)//设置上拉加载是否可用
 ```
 两个方法来设置是否启用上拉加载和下拉刷新。
+4. 当刷新数据完成之后要通过public void setRefreshTime(String time)方法来设置刷新时间。
