@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <string name="app_name">ShapeDrawable</string>
+    <string name="app_name">带有上拉加载下拉刷新的ListView</string>
     <string name="action_settings">Settings</string>
     <string name="hello_world">Hello world!</string>
 
