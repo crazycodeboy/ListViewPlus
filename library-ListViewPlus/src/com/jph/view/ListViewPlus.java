@@ -4,12 +4,15 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
 
+import android.annotation.TargetApi;
 import android.content.Context;
+import android.os.Build;
 import android.util.AttributeSet;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewTreeObserver;
 import android.view.ViewTreeObserver.OnGlobalLayoutListener;
 import android.view.animation.Animation;
 import android.view.animation.DecelerateInterpolator;
@@ -27,57 +30,61 @@ import android.widget.TextView;
 
 import com.jph.lp.R;
 
-/** 
+/**
  * 基于ListView的自定义控件实现上拉加载下拉刷新
+ * 
  * @author JPH
  * @date 2015-3-10 下午1:01:56
  */
 public class ListViewPlus extends ListView implements OnScrollListener {
-	/**区分当前操作是刷新还是加载**/
+	/** 区分当前操作是刷新还是加载 **/
 	public static final int REFRESH = 0;
 	public static final int LOAD = 1;
-	private float mLastY = -1; // save event y
-	private Scroller mScroller; // used for scroll back
-	private OnScrollListener mScrollListener; // user's scroll listener
 
-	// the interface to trigger refresh and load more.
-	private ListViewPlusListener mListViewListener;
+	private final static int SCROLL_BACK_HEADER = 0;
+	private final static int SCROLL_BACK_FOOTER = 1;
 
-	// -- header view
-	private ListViewPlusHeader mHeaderView;
-	// header view content, use it to calculate the Header's height. And hide it
-	// when disable pull refresh.
-	private RelativeLayout mHeaderViewContent;
-	private TextView mHeaderTimeView;
-	private int mHeaderViewHeight; // header view's height
-	private boolean mEnablePullRefresh = true;
-	private boolean mPullRefreshing = false; // is refreashing.
+	private final static int SCROLL_DURATION = 400;
 
-	// -- footer view
-	private ListViewPlusFooter mFooterView;
-	private boolean mEnablePullLoad;
-	private boolean mPullLoading;
-	private boolean mIsFooterReady = false;
+	// when pull up >= 50px
+	private final static int PULL_LOAD_MORE_DELTA = 50;
 
-	// total list items, used to detect is at the bottom of listview.
-	private int mTotalItemCount;
+	// support iOS like pull
+	private final static float OFFSET_RADIO = 1.8f;
 
+	private float mLastY = -1;
+	private int minItemCount = 3;
+	// used for scroll back
+	private Scroller mScroller;
+	// user's scroll listener
+	private OnScrollListener mScrollListener;
 	// for mScroller, scroll back from header or footer.
 	private int mScrollBack;
-	private int minItemCount=3;
-	private final static int SCROLLBACK_HEADER = 0;
-	private final static int SCROLLBACK_FOOTER = 1;
 
-	private final static int SCROLL_DURATION = 400; // scroll back duration
-	private final static int PULL_LOAD_MORE_DELTA = 50; // when pull up >= 50px
-														// at bottom, trigger
-														// load more.
-	private final static float OFFSET_RADIO = 1.8f; // support iOS like pull
-													// feature.
+	// the interface to trigger refresh and load more.
+	private ListViewPlusListener mListener;
 
-	/**
-	 * @param context
-	 */
+	private ListViewPlusHeader mHeader;
+	// header view content, use it to calculate the Header's height. And hide it
+	// when disable pull refresh.
+	private RelativeLayout mHeaderContent;
+	private TextView mHeaderTime;
+	private int mHeaderHeight;
+
+	private LinearLayout mFooterLayout;
+	private ListViewPlusFooter mFooterView;
+	private boolean mIsFooterReady = false;
+
+	private boolean mEnablePullRefresh = true;
+	private boolean mPullRefreshing = false;
+
+	private boolean mEnablePullLoad = true;
+	private boolean mEnableAutoLoad = false;
+	private boolean mPullLoading = false;
+
+	// total list items, used to detect is at the bottom of ListView
+	private int mTotalItemCount;
+
 	public ListViewPlus(Context context) {
 		super(context);
 		initWithContext(context);
@@ -95,75 +102,91 @@ public class ListViewPlus extends ListView implements OnScrollListener {
 
 	private void initWithContext(Context context) {
 		mScroller = new Scroller(context, new DecelerateInterpolator());
-		// listview_plus need the scroll event, and it will dispatch the event to
-		// user's listener (as a proxy).
 		super.setOnScrollListener(this);
 
 		// init header view
-		mHeaderView = new ListViewPlusHeader(context);
-		mHeaderViewContent = (RelativeLayout) mHeaderView
+		mHeader = new ListViewPlusHeader(context);
+		mHeaderContent = (RelativeLayout) mHeader
 				.findViewById(R.id.listview_plus_header_content);
-		mHeaderTimeView = (TextView) mHeaderView
+		mHeaderTime = (TextView) mHeader
 				.findViewById(R.id.listview_plus_header_time);
-		addHeaderView(mHeaderView);
+		addHeaderView(mHeader);
 
 		// init footer view
 		mFooterView = new ListViewPlusFooter(context);
+		mFooterLayout = new LinearLayout(context);
+		LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+				LinearLayout.LayoutParams.MATCH_PARENT,
+				LinearLayout.LayoutParams.MATCH_PARENT);
+		params.gravity = Gravity.CENTER;
+		mFooterLayout.addView(mFooterView, params);
 
 		// init header height
-		mHeaderView.getViewTreeObserver().addOnGlobalLayoutListener(
-				new OnGlobalLayoutListener() {
-					@Override
-					public void onGlobalLayout() {
-						mHeaderViewHeight = mHeaderViewContent.getHeight();
-						getViewTreeObserver()
-								.removeGlobalOnLayoutListener(this);
+		ViewTreeObserver observer = mHeader.getViewTreeObserver();
+		if (null != observer) {
+			observer.addOnGlobalLayoutListener(new OnGlobalLayoutListener() {
+				@SuppressWarnings("deprecation")
+				@TargetApi(Build.VERSION_CODES.JELLY_BEAN)
+				@Override
+				public void onGlobalLayout() {
+					mHeaderHeight = mHeaderContent.getHeight();
+					ViewTreeObserver observer = getViewTreeObserver();
+
+					if (null != observer) {
+						if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN) {
+							observer.removeGlobalOnLayoutListener(this);
+						} else {
+							observer.removeOnGlobalLayoutListener(this);
+						}
 					}
-				});
+				}
+			});
+		}
 	}
 
 	@Override
 	public void setAdapter(ListAdapter adapter) {
-		// make sure ListViewPlusFooter is the last footer view, and only add once.
-		if (mIsFooterReady == false) {
+		// make sure ListViewPlusFooter is the last footer view, and only add
+		// once.
+		if (!mIsFooterReady) {
 			mIsFooterReady = true;
-			addFooterView(mFooterView);
+			addFooterView(mFooterLayout);
 		}
+
 		super.setAdapter(adapter);
 	}
 
 	/**
-	 * enable or disable pull down refresh feature.
+	 * Enable or disable pull down refresh feature.
 	 * 
 	 * @param enable
 	 */
 	public void setRefreshEnable(boolean enable) {
 		mEnablePullRefresh = enable;
-		if (!mEnablePullRefresh) { // disable, hide the content
-			mHeaderViewContent.setVisibility(View.INVISIBLE);
-		} else {
-			mHeaderViewContent.setVisibility(View.VISIBLE);
-		}
+
+		// disable, hide the content
+		mHeaderContent.setVisibility(enable ? View.VISIBLE : View.INVISIBLE);
 	}
 
 	/**
-	 * enable or disable pull up load more feature.
+	 * Enable or disable pull up load more feature.
 	 * 
 	 * @param enable
 	 */
 	public void setLoadEnable(boolean enable) {
 		mEnablePullLoad = enable;
+
 		if (!mEnablePullLoad) {
+			mFooterView.setBottomMargin(0);
 			mFooterView.hide();
+			mFooterView.setPadding(0, 0, 0, mFooterView.getHeight() * (-1));
 			mFooterView.setOnClickListener(null);
-			//make sure "pull up" don't show a line in bottom when listview with one page 
-			setFooterDividersEnabled(false);
+
 		} else {
 			mPullLoading = false;
+			mFooterView.setPadding(0, 0, 0, 0);
 			mFooterView.show();
 			mFooterView.setState(ListViewPlusFooter.STATE_NORMAL);
-			//make sure "pull up" don't show a line in bottom when listview with one page  
-			setFooterDividersEnabled(true);
 			// both "pull up" and "click" will invoke load more.
 			mFooterView.setOnClickListener(new OnClickListener() {
 				@Override
@@ -175,97 +198,142 @@ public class ListViewPlus extends ListView implements OnScrollListener {
 	}
 
 	/**
-	 * stop refresh, reset header view.
+	 * Enable or disable auto load more feature when scroll to bottom.
+	 * 
+	 * @param enable
+	 */
+	public void setAutoLoadEnable(boolean enable) {
+		mEnableAutoLoad = enable;
+	}
+
+	/**
+	 * Stop refresh, reset header view.
 	 */
 	public void stopRefresh() {
-		if (mPullRefreshing == true) {
+		if (mPullRefreshing) {
 			mPullRefreshing = false;
 			resetHeaderHeight();
-			setRefreshTime(getCurrentTime());
 		}
 	}
 
 	/**
-	 * stop load more, reset footer view.
+	 * Stop load more, reset footer view.
 	 */
 	public void stopLoadMore() {
-		if (mPullLoading == true) {
+		if (mPullLoading) {
 			mPullLoading = false;
 			mFooterView.setState(ListViewPlusFooter.STATE_NORMAL);
 		}
 	}
 
 	/**
-	 * set last refresh time
+	 * Set last refresh time
 	 * 
 	 * @param time
 	 */
 	public void setRefreshTime(String time) {
-		mHeaderTimeView.setText(time);
+		mHeaderTime.setText(time);
+	}
+
+	/**
+	 * Set listener.
+	 * 
+	 * @param listener
+	 */
+	public void setListViewPlusListener(ListViewPlusListener listener) {
+		mListener = listener;
+	}
+
+	/**
+	 * Auto call back refresh.
+	 */
+	public void autoRefresh() {
+		mHeader.setVisibleHeight(mHeaderHeight);
+
+		if (mEnablePullRefresh && !mPullRefreshing) {
+			// update the arrow image not refreshing
+			if (mHeader.getVisibleHeight() > mHeaderHeight) {
+				mHeader.setState(ListViewPlusHeader.STATE_READY);
+			} else {
+				mHeader.setState(ListViewPlusHeader.STATE_NORMAL);
+			}
+		}
+
+		mPullRefreshing = true;
+		mHeader.setState(ListViewPlusHeader.STATE_REFRESHING);
+		refresh();
 	}
 
 	private void invokeOnScrolling() {
 		if (mScrollListener instanceof OnXScrollListener) {
-			OnXScrollListener l = (OnXScrollListener) mScrollListener;
-			l.onXScrolling(this);
+			OnXScrollListener listener = (OnXScrollListener) mScrollListener;
+			listener.onXScrolling(this);
 		}
 	}
 
 	private void updateHeaderHeight(float delta) {
-		mHeaderView.setVisiableHeight((int) delta
-				+ mHeaderView.getVisiableHeight());
-		if (mEnablePullRefresh && !mPullRefreshing) { // 未处于刷新状态，更新箭头
-			if (mHeaderView.getVisiableHeight() > mHeaderViewHeight) {
-				mHeaderView.setState(ListViewPlusHeader.STATE_READY);
+		mHeader.setVisibleHeight((int) delta + mHeader.getVisibleHeight());
+
+		if (mEnablePullRefresh && !mPullRefreshing) {
+			// update the arrow image unrefreshing
+			if (mHeader.getVisibleHeight() > mHeaderHeight) {
+				mHeader.setState(ListViewPlusHeader.STATE_READY);
 			} else {
-				mHeaderView.setState(ListViewPlusHeader.STATE_NORMAL);
+				mHeader.setState(ListViewPlusHeader.STATE_NORMAL);
 			}
 		}
-		setSelection(0); // scroll to top each time
+
+		// scroll to top each time
+		setSelection(0);
 	}
 
-	/**
-	 * reset header view's height.
-	 */
 	private void resetHeaderHeight() {
-		int height = mHeaderView.getVisiableHeight();
-		if (height == 0) // not visible.
+		int height = mHeader.getVisibleHeight();
+		if (height == 0)
 			return;
+
 		// refreshing and header isn't shown fully. do nothing.
-		if (mPullRefreshing && height <= mHeaderViewHeight) {
+		if (mPullRefreshing && height <= mHeaderHeight)
 			return;
-		}
-		int finalHeight = 0; // default: scroll back to dismiss header.
+
+		// default: scroll back to dismiss header.
+		int finalHeight = 0;
 		// is refreshing, just scroll back to show all the header.
-		if (mPullRefreshing && height > mHeaderViewHeight) {
-			finalHeight = mHeaderViewHeight;
+		if (mPullRefreshing && height > mHeaderHeight) {
+			finalHeight = mHeaderHeight;
 		}
-		mScrollBack = SCROLLBACK_HEADER;
+
+		mScrollBack = SCROLL_BACK_HEADER;
 		mScroller.startScroll(0, height, 0, finalHeight - height,
 				SCROLL_DURATION);
+
 		// trigger computeScroll
 		invalidate();
 	}
 
 	private void updateFooterHeight(float delta) {
 		int height = mFooterView.getBottomMargin() + (int) delta;
+
 		if (mEnablePullLoad && !mPullLoading) {
-			if (height > PULL_LOAD_MORE_DELTA) { // height enough to invoke load
-													// more.
+			if (height > PULL_LOAD_MORE_DELTA) {
+				// height enough to invoke load more.
 				mFooterView.setState(ListViewPlusFooter.STATE_READY);
 			} else {
 				mFooterView.setState(ListViewPlusFooter.STATE_NORMAL);
 			}
 		}
+
 		mFooterView.setBottomMargin(height);
 
-		// setSelection(mTotalItemCount - 1); // scroll to bottom
+		// scroll to bottom
+		// setSelection(mTotalItemCount - 1);
 	}
 
 	private void resetFooterHeight() {
 		int bottomMargin = mFooterView.getBottomMargin();
+
 		if (bottomMargin > 0) {
-			mScrollBack = SCROLLBACK_FOOTER;
+			mScrollBack = SCROLL_BACK_FOOTER;
 			mScroller.startScroll(0, bottomMargin, 0, -bottomMargin,
 					SCROLL_DURATION);
 			invalidate();
@@ -275,9 +343,7 @@ public class ListViewPlus extends ListView implements OnScrollListener {
 	private void startLoadMore() {
 		mPullLoading = true;
 		mFooterView.setState(ListViewPlusFooter.STATE_LOADING);
-		if (mListViewListener != null) {
-			mListViewListener.onLoadMore();
-		}
+		loadMore();
 	}
 
 	@Override
@@ -290,38 +356,42 @@ public class ListViewPlus extends ListView implements OnScrollListener {
 		case MotionEvent.ACTION_DOWN:
 			mLastY = ev.getRawY();
 			break;
+
 		case MotionEvent.ACTION_MOVE:
 			final float deltaY = ev.getRawY() - mLastY;
 			mLastY = ev.getRawY();
+
 			if (getFirstVisiblePosition() == 0
-					&& (mHeaderView.getVisiableHeight() > 0 || deltaY > 0)) {
+					&& (mHeader.getVisibleHeight() > 0 || deltaY > 0)) {
 				// the first item is showing, header has shown or pull down.
 				updateHeaderHeight(deltaY / OFFSET_RADIO);
 				invokeOnScrolling();
+
 			} else if (getLastVisiblePosition() == mTotalItemCount - 1
 					&& (mFooterView.getBottomMargin() > 0 || deltaY < 0)) {
 				// last item, already pulled up or want to pull up.
 				updateFooterHeight(-deltaY / OFFSET_RADIO);
 			}
 			break;
+
 		default:
-			mLastY = -1; // reset
+			// reset
+			mLastY = -1;
 			if (getFirstVisiblePosition() == 0) {
 				// invoke refresh
 				if (mEnablePullRefresh
-						&& mHeaderView.getVisiableHeight() > mHeaderViewHeight) {
+						&& mHeader.getVisibleHeight() > mHeaderHeight) {
 					mPullRefreshing = true;
-					mHeaderView.setState(ListViewPlusHeader.STATE_REFRESHING);
-					if (mListViewListener != null) {
-						mListViewListener.onRefresh();
-					}
+					mHeader.setState(ListViewPlusHeader.STATE_REFRESHING);
+					refresh();
 				}
+
 				resetHeaderHeight();
+
 			} else if (getLastVisiblePosition() == mTotalItemCount - 1) {
 				// invoke load more.
 				if (mEnablePullLoad
-				    && mFooterView.getBottomMargin() > PULL_LOAD_MORE_DELTA
-				    && !mPullLoading) {
+						&& mFooterView.getBottomMargin() > PULL_LOAD_MORE_DELTA) {
 					startLoadMore();
 				}
 				resetFooterHeight();
@@ -334,14 +404,16 @@ public class ListViewPlus extends ListView implements OnScrollListener {
 	@Override
 	public void computeScroll() {
 		if (mScroller.computeScrollOffset()) {
-			if (mScrollBack == SCROLLBACK_HEADER) {
-				mHeaderView.setVisiableHeight(mScroller.getCurrY());
+			if (mScrollBack == SCROLL_BACK_HEADER) {
+				mHeader.setVisibleHeight(mScroller.getCurrY());
 			} else {
 				mFooterView.setBottomMargin(mScroller.getCurrY());
 			}
+
 			postInvalidate();
 			invokeOnScrolling();
 		}
+
 		super.computeScroll();
 	}
 
@@ -349,36 +421,51 @@ public class ListViewPlus extends ListView implements OnScrollListener {
 	public void setOnScrollListener(OnScrollListener l) {
 		mScrollListener = l;
 	}
+
 	@Override
 	public void onScrollStateChanged(AbsListView view, int scrollState) {
 		if (mScrollListener != null) {
 			mScrollListener.onScrollStateChanged(view, scrollState);
 		}
+
+		if (scrollState == OnScrollListener.SCROLL_STATE_IDLE) {
+			if (mEnableAutoLoad && getLastVisiblePosition() == getCount() - 1) {
+				startLoadMore();
+			}
+		}
 	}
+
 	@Override
 	public void onScroll(AbsListView view, int firstVisibleItem,
 			int visibleItemCount, int totalItemCount) {
 		// send to user's listener
-		if(mFooterView!=null){
-			if (totalItemCount<minItemCount+2) {//如果ListView中只包含头布局和尾布局（及ListView的adapter没有数据），则不显示脚布局文本
-				mFooterView.getmHintView().setText("");
-			}else {
-				if(mFooterView.getmHintView().getText().toString().equals(""))mFooterView.getmHintView().
-					setText(getResources().getString(R.string.listview_plus_footer_hint_normal));
-			}
-		}
 		mTotalItemCount = totalItemCount;
 		if (mScrollListener != null) {
 			mScrollListener.onScroll(view, firstVisibleItem, visibleItemCount,
 					totalItemCount);
 		}
+		if (mFooterView != null) {
+			if (totalItemCount < minItemCount + 2) {// 如果ListView中只包含头布局和尾布局（及ListView的adapter没有数据），则不显示脚布局文件
+				this.removeFooterView(mFooterLayout);
+			} else {
+				if(this.getFooterViewsCount()<1)this.addFooterView(mFooterLayout);
+			}
+		}
 	}
-	public void setListViewPlusListener(ListViewPlusListener l) {
-		mListViewListener = l;
+	private void refresh() {
+		if (mEnablePullRefresh && null != mListener) {
+			mListener.onRefresh();
+		}
+	}
+
+	private void loadMore() {
+		if (mEnablePullLoad && null != mListener) {
+			mListener.onLoadMore();
+		}
 	}
 
 	/**
-	 * you can listen ListView.OnScrollListener or this one. it will invoke
+	 * You can listen ListView.OnScrollListener or this one. it will invoke
 	 * onXScrolling when header/footer scroll back.
 	 */
 	public interface OnXScrollListener extends OnScrollListener {
@@ -390,61 +477,157 @@ public class ListViewPlus extends ListView implements OnScrollListener {
 	 */
 	public interface ListViewPlusListener {
 		public void onRefresh();
+
 		public void onLoadMore();
 	}
+
 	public String getCurrentTime() {
-		SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd  HH:mm:ss", Locale.getDefault());
+		SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd  HH:mm:ss",
+				Locale.getDefault());
 		String currentTime = sdf.format(new Date());
 		return currentTime;
 	}
+
 	/**
 	 * ListView的Footer类
+	 * 
 	 * @author JPH
 	 */
 	class ListViewPlusFooter extends LinearLayout {
 		public final static int STATE_NORMAL = 0;
 		public final static int STATE_READY = 1;
 		public final static int STATE_LOADING = 2;
-		private Context mContext;
-		private View mContentView;
+
+		private final int ROTATE_ANIM_DURATION = 180;
+
+		private View mLayout;
+
 		private View mProgressBar;
+
 		private TextView mHintView;
-		
+
+		// private ImageView mHintImage;
+
+		private Animation mRotateUpAnim;
+		private Animation mRotateDownAnim;
+
+		private int mState = STATE_NORMAL;
+
 		public ListViewPlusFooter(Context context) {
 			super(context);
 			initView(context);
 		}
+
 		public ListViewPlusFooter(Context context, AttributeSet attrs) {
 			super(context, attrs);
 			initView(context);
 		}
+
+		private void initView(Context context) {
+			mLayout = LayoutInflater.from(context).inflate(
+					R.layout.listview_plus_footer, null);
+			mLayout.setLayoutParams(new LinearLayout.LayoutParams(
+					LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+			addView(mLayout);
+
+			mProgressBar = mLayout
+					.findViewById(R.id.listview_plus_footer_progressbar);
+			mHintView = (TextView) mLayout
+					.findViewById(R.id.listview_plus_footer_hint_textview);
+			// mHintImage = (ImageView) mLayout.findViewById(R.id.footer_arrow);
+
+			mRotateUpAnim = new RotateAnimation(0.0f, 180.0f,
+					Animation.RELATIVE_TO_SELF, 0.5f,
+					Animation.RELATIVE_TO_SELF, 0.5f);
+			mRotateUpAnim.setDuration(ROTATE_ANIM_DURATION);
+			mRotateUpAnim.setFillAfter(true);
+
+			mRotateDownAnim = new RotateAnimation(180.0f, 0.0f,
+					Animation.RELATIVE_TO_SELF, 0.5f,
+					Animation.RELATIVE_TO_SELF, 0.5f);
+			mRotateDownAnim.setDuration(ROTATE_ANIM_DURATION);
+			mRotateDownAnim.setFillAfter(true);
+		}
+
+		public TextView getmHintView() {
+			return mHintView;
+		}
+
+		/**
+		 * Set footer view state
+		 * 
+		 * @see #STATE_LOADING
+		 * @see #STATE_NORMAL
+		 * @see #STATE_READY
+		 * 
+		 * @param state
+		 */
 		public void setState(int state) {
-			mHintView.setVisibility(View.INVISIBLE);
-			mProgressBar.setVisibility(View.INVISIBLE);
-			mHintView.setVisibility(View.INVISIBLE);
-			if (state == STATE_READY) {
-				mHintView.setVisibility(View.VISIBLE);
-				mHintView.setText(R.string.listview_plus_footer_hint_ready);
-			} else if (state == STATE_LOADING) {
+			if (state == mState)
+				return;
+
+			if (state == STATE_LOADING) {
+				// mHintImage.clearAnimation();
+				// mHintImage.setVisibility(View.INVISIBLE);
 				mProgressBar.setVisibility(View.VISIBLE);
+				mHintView.setVisibility(View.INVISIBLE);
 			} else {
 				mHintView.setVisibility(View.VISIBLE);
-				mHintView.setText(R.string.listview_plus_footer_hint_normal);
+				// mHintImage.setVisibility(View.VISIBLE);
+				mProgressBar.setVisibility(View.INVISIBLE);
 			}
+
+			switch (state) {
+			case STATE_NORMAL:
+				// if (mState == STATE_READY) {
+				// mHintImage.startAnimation(mRotateDownAnim);
+				// }
+				// if (mState == STATE_LOADING) {
+				// mHintImage.clearAnimation();
+				// }
+				mHintView.setText(R.string.listview_plus_footer_hint_normal);
+				break;
+
+			case STATE_READY:
+				if (mState != STATE_READY) {
+					// mHintImage.clearAnimation();
+					// mHintImage.startAnimation(mRotateUpAnim);
+					mHintView.setText(R.string.listview_plus_footer_hint_ready);
+				}
+				break;
+
+			case STATE_LOADING:
+				break;
+			}
+
+			mState = state;
 		}
-		
-		public void setBottomMargin(int height) {
-			if (height < 0) return ;
-			LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams)mContentView.getLayoutParams();
-			lp.bottomMargin = height;
-			mContentView.setLayoutParams(lp);
+
+		/**
+		 * Set footer view bottom margin.
+		 * 
+		 * @param margin
+		 */
+		public void setBottomMargin(int margin) {
+			if (margin < 0)
+				return;
+			LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) mLayout
+					.getLayoutParams();
+			lp.bottomMargin = margin;
+			mLayout.setLayoutParams(lp);
 		}
-		
+
+		/**
+		 * Get footer view bottom margin.
+		 * 
+		 * @return
+		 */
 		public int getBottomMargin() {
-			LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams)mContentView.getLayoutParams();
+			LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) mLayout
+					.getLayoutParams();
 			return lp.bottomMargin;
 		}
-		
+
 		/**
 		 * normal status
 		 */
@@ -452,50 +635,39 @@ public class ListViewPlus extends ListView implements OnScrollListener {
 			mHintView.setVisibility(View.VISIBLE);
 			mProgressBar.setVisibility(View.GONE);
 		}
-		
-		
+
 		/**
-		 * loading status 
+		 * loading status
 		 */
 		public void loading() {
 			mHintView.setVisibility(View.GONE);
 			mProgressBar.setVisibility(View.VISIBLE);
 		}
-		
+
 		/**
 		 * hide footer when disable pull load more
 		 */
 		public void hide() {
-			LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams)mContentView.getLayoutParams();
+			LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) mLayout
+					.getLayoutParams();
 			lp.height = 0;
-			mContentView.setLayoutParams(lp);
+			mLayout.setLayoutParams(lp);
 		}
-		
+
 		/**
 		 * show footer
 		 */
 		public void show() {
-			LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams)mContentView.getLayoutParams();
+			LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) mLayout
+					.getLayoutParams();
 			lp.height = LayoutParams.WRAP_CONTENT;
-			mContentView.setLayoutParams(lp);
-		}
-		
-		private void initView(Context context) {
-			mContext = context;
-			LinearLayout moreView = (LinearLayout)LayoutInflater.from(mContext).inflate(R.layout.listview_plus_footer, null);
-			addView(moreView);
-			moreView.setLayoutParams(new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
-			
-			mContentView = moreView.findViewById(R.id.listview_plus_footer_content);
-			mProgressBar = moreView.findViewById(R.id.listview_plus_footer_progressbar);
-			mHintView = (TextView)moreView.findViewById(R.id.listview_plus_footer_hint_textview);
-		}
-		public TextView getmHintView() {
-			return mHintView;
+			mLayout.setLayoutParams(lp);
 		}
 	}
+
 	/**
 	 * listView的头布局
+	 * 
 	 * @author JPH
 	 */
 	class ListViewPlusHeader extends LinearLayout {
@@ -505,8 +677,8 @@ public class ListViewPlus extends ListView implements OnScrollListener {
 		private TextView mHintTextView;
 		private int mState = STATE_NORMAL;
 		private Animation mRotateUpAnim;
-		private Animation mRotateDownAnim;	
-		private final int ROTATE_ANIM_DURATION = 180;	
+		private Animation mRotateDownAnim;
+		private final int ROTATE_ANIM_DURATION = 180;
 		public final static int STATE_NORMAL = 0;
 		public final static int STATE_READY = 1;
 		public final static int STATE_REFRESHING = 2;
@@ -534,35 +706,36 @@ public class ListViewPlus extends ListView implements OnScrollListener {
 			addView(mContainer, lp);
 			setGravity(Gravity.BOTTOM);
 
-			mArrowImageView = (ImageView)findViewById(R.id.listview_plus_header_arrow);
-			mHintTextView = (TextView)findViewById(R.id.listview_plus_header_hint_textview);
-			mProgressBar = (ProgressBar)findViewById(R.id.listview_plus_header_progressbar);
-			
+			mArrowImageView = (ImageView) findViewById(R.id.listview_plus_header_arrow);
+			mHintTextView = (TextView) findViewById(R.id.listview_plus_header_hint_textview);
+			mProgressBar = (ProgressBar) findViewById(R.id.listview_plus_header_progressbar);
+
 			mRotateUpAnim = new RotateAnimation(0.0f, -180.0f,
-					Animation.RELATIVE_TO_SELF, 0.5f, Animation.RELATIVE_TO_SELF,
-					0.5f);
+					Animation.RELATIVE_TO_SELF, 0.5f,
+					Animation.RELATIVE_TO_SELF, 0.5f);
 			mRotateUpAnim.setDuration(ROTATE_ANIM_DURATION);
 			mRotateUpAnim.setFillAfter(true);
 			mRotateDownAnim = new RotateAnimation(-180.0f, 0.0f,
-					Animation.RELATIVE_TO_SELF, 0.5f, Animation.RELATIVE_TO_SELF,
-					0.5f);
+					Animation.RELATIVE_TO_SELF, 0.5f,
+					Animation.RELATIVE_TO_SELF, 0.5f);
 			mRotateDownAnim.setDuration(ROTATE_ANIM_DURATION);
 			mRotateDownAnim.setFillAfter(true);
 		}
 
 		public void setState(int state) {
-			if (state == mState) return ;
-			
-			if (state == STATE_REFRESHING) {	// 显示进度
+			if (state == mState)
+				return;
+
+			if (state == STATE_REFRESHING) { // 显示进度
 				mArrowImageView.clearAnimation();
 				mArrowImageView.setVisibility(View.INVISIBLE);
 				mProgressBar.setVisibility(View.VISIBLE);
-			} else {	// 显示箭头图片
+			} else { // 显示箭头图片
 				mArrowImageView.setVisibility(View.VISIBLE);
 				mProgressBar.setVisibility(View.INVISIBLE);
 			}
-			
-			switch(state){
+
+			switch (state) {
 			case STATE_NORMAL:
 				if (mState == STATE_READY) {
 					mArrowImageView.startAnimation(mRotateDownAnim);
@@ -570,25 +743,28 @@ public class ListViewPlus extends ListView implements OnScrollListener {
 				if (mState == STATE_REFRESHING) {
 					mArrowImageView.clearAnimation();
 				}
-				mHintTextView.setText(R.string.listview_plus_header_hint_normal);
+				mHintTextView
+						.setText(R.string.listview_plus_header_hint_normal);
 				break;
 			case STATE_READY:
 				if (mState != STATE_READY) {
 					mArrowImageView.clearAnimation();
 					mArrowImageView.startAnimation(mRotateUpAnim);
-					mHintTextView.setText(R.string.listview_plus_header_hint_ready);
+					mHintTextView
+							.setText(R.string.listview_plus_header_hint_ready);
 				}
 				break;
 			case STATE_REFRESHING:
-				mHintTextView.setText(R.string.listview_plus_header_hint_loading);
+				mHintTextView
+						.setText(R.string.listview_plus_header_hint_loading);
 				break;
-				default:
+			default:
 			}
-			
+
 			mState = state;
 		}
-		
-		public void setVisiableHeight(int height) {
+
+		public void setVisibleHeight(int height) {
 			if (height < 0)
 				height = 0;
 			LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) mContainer
@@ -596,7 +772,8 @@ public class ListViewPlus extends ListView implements OnScrollListener {
 			lp.height = height;
 			mContainer.setLayoutParams(lp);
 		}
-		public int getVisiableHeight() {
+
+		public int getVisibleHeight() {
 			return mContainer.getLayoutParams().height;
 		}
 	}

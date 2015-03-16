@@ -15,14 +15,16 @@ import com.jph.sample.utils.Utils;
 import com.jph.view.ListViewPlus;
 import com.jph.view.ListViewPlus.ListViewPlusListener;
 
-/** 
+/**
  * ListViewPlus应用实例
+ * 
  * @author JPH
  * @date 2015-3-10 下午12:35:13
  */
-public class MainActivity extends Activity implements ListViewPlusListener{
+public class MainActivity extends Activity implements ListViewPlusListener {
 	private ListViewPlus lvPlus;
 	private ListViewAdapter mAdapter;
+	private boolean isFirstLoad;
 	private ArrayList<String> items = new ArrayList<String>();
 	private Handler handler = new Handler() {
 		public void handleMessage(Message msg) {
@@ -37,49 +39,65 @@ public class MainActivity extends Activity implements ListViewPlusListener{
 				items.addAll(result);
 				onLoadComplete();
 				break;
-			}			
+			}
 			mAdapter.notifyDataSetChanged();
 		};
 	};
+
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
-		setContentView(R.layout.main);		
+		setContentView(R.layout.main);
+		isFirstLoad=true;
 		lvPlus = (ListViewPlus) findViewById(R.id.lvPlus);
 		lvPlus.setRefreshEnable(true);
 		lvPlus.setLoadEnable(true);
+		lvPlus.setAutoLoadEnable(true);
 		initData();
 		mAdapter = new ListViewAdapter(this, items);
 		lvPlus.setAdapter(mAdapter);
 		lvPlus.setListViewPlusListener(this);
 	}
+
+	@Override
+	public void onWindowFocusChanged(boolean hasFocus) {
+		super.onWindowFocusChanged(hasFocus);
+		if (hasFocus&&isFirstLoad) {
+			lvPlus.autoRefresh();
+			isFirstLoad=false;
+		}
+	}
+
 	/**
 	 * 初始化数据
 	 */
 	private void initData() {
 		loadData(ListViewPlus.REFRESH);
 	}
+
 	private void onLoadComplete() {
 		lvPlus.stopRefresh();
 		lvPlus.stopLoadMore();
 		lvPlus.setRefreshTime(Utils.getCurrentTime());
-	}	
+	}
+
 	@Override
-	public void onRefresh() {		
-		loadData(ListViewPlus.REFRESH);		
+	public void onRefresh() {
+		loadData(ListViewPlus.REFRESH);
 	}
 
 	@Override
 	public void onLoadMore() {
 		loadData(ListViewPlus.LOAD);
 	}
+
 	private void loadData(final int what) {
 		// 这里模拟从服务器获取数据
 		new Thread(new Runnable() {
 			@Override
 			public void run() {
 				try {
-					Thread.sleep(700);
+					Thread.sleep(2000);
 				} catch (InterruptedException e) {
 					e.printStackTrace();
 				}
@@ -90,6 +108,7 @@ public class MainActivity extends Activity implements ListViewPlusListener{
 			}
 		}).start();
 	}
+
 	// 测试数据
 	public List<String> getData() {
 		List<String> result = new ArrayList<String>();
