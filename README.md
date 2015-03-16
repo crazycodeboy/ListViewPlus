@@ -17,4 +17,5 @@ public void setRefreshEnable(boolean enable)//设置下拉刷新是否可用
 public void setLoadEnable(boolean enable)//设置上拉加载是否可用
 ```
 两个方法来设置是否启用上拉加载和下拉刷新。  
-4. 当刷新数据完成之后要通过public void setRefreshTime(String time)方法来设置刷新时间。
+4. 当刷新数据完成之后要通过public void setRefreshTime(String time)方法来设置刷新时间。   
+5. 通过setAutoLoadEnable(boolean enable)方法可以启用上垃到底部时自动加载功能。
