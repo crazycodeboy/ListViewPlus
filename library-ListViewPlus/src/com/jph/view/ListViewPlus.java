@@ -75,10 +75,10 @@ public class ListViewPlus extends ListView implements OnScrollListener {
 	private ListViewPlusFooter mFooterView;
 	private boolean mIsFooterReady = false;
 
-	private boolean mEnablePullRefresh = true;
+	private boolean mEnablePullRefresh = false;
 	private boolean mPullRefreshing = false;
 
-	private boolean mEnablePullLoad = true;
+	private boolean mEnablePullLoad = false;
 	private boolean mEnableAutoLoad = false;
 	private boolean mPullLoading = false;
 
@@ -111,7 +111,7 @@ public class ListViewPlus extends ListView implements OnScrollListener {
 		mHeaderTime = (TextView) mHeader
 				.findViewById(R.id.listview_plus_header_time);
 		addHeaderView(mHeader);
-
+		mHeader.setFocusable(true);
 		// init footer view
 		mFooterView = new ListViewPlusFooter(context);
 		mFooterLayout = new LinearLayout(context);
